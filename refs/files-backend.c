@@ -2204,13 +2204,12 @@ static int split_symref_update(struct files_ref_store *refs,
 
 	/*
 	 * First make sure that referent is not already in the
-	 * transaction. This insertion is O(N) in the transaction
+	 * transaction. This check is O(lg N) in the transaction
 	 * size, but it happens at most once per symref in a
 	 * transaction.
 	 */
-	item = string_list_insert(affected_refnames, referent);
-	if (item->util) {
-		/* An entry already existed */
+	if (string_list_has_string(affected_refnames, referent)) {
+		/* An entry already exists */
 		strbuf_addf(err,
 			    "multiple updates for '%s' (including one "
 			    "via symref '%s') are not allowed",
@@ -2245,6 +2244,17 @@ static int split_symref_update(struct files_ref_store *refs,
 	update->flags |= REF_LOG_ONLY | REF_NODEREF;
 	update->flags &= ~REF_HAVE_OLD;
 
+	/*
+	 * Add the referent. This insertion is O(N) in the transaction
+	 * size, but it happens at most once per symref in a
+	 * transaction. Make sure to add new_update->refname, which will
+	 * be valid as long as affected_refnames is in use, and NOT
+	 * referent, which might soon be freed by our caller.
+	 */
+	item = string_list_insert(affected_refnames, new_update->refname);
+	if (item->util)
+		BUG("%s unexpectedly found in affected_refnames",
+		    new_update->refname);
 	item->util = new_update;
 
 	return 0;
@@ -2316,7 +2326,7 @@ static int lock_ref_for_update(struct files_ref_store *refs,
 	struct strbuf referent = STRBUF_INIT;
 	int mustexist = (update->flags & REF_HAVE_OLD) &&
 		!is_null_oid(&update->old_oid);
-	int ret;
+	int ret = 0;
 	struct ref_lock *lock;
 
 	files_assert_main_repository(refs, "lock_ref_for_update");
@@ -2328,7 +2338,7 @@ static int lock_ref_for_update(struct files_ref_store *refs,
 		ret = split_head_update(update, transaction, head_ref,
 					affected_refnames, err);
 		if (ret)
-			return ret;
+			goto out;
 	}
 
 	ret = lock_raw_ref(refs, update->refname, mustexist,
@@ -2342,7 +2352,7 @@ static int lock_ref_for_update(struct files_ref_store *refs,
 		strbuf_addf(err, "cannot lock ref '%s': %s",
 			    original_update_refname(update), reason);
 		free(reason);
-		return ret;
+		goto out;
 	}
 
 	update->backend_data = lock;
@@ -2361,10 +2371,12 @@ static int lock_ref_for_update(struct files_ref_store *refs,
 					strbuf_addf(err, "cannot lock ref '%s': "
 						    "error reading reference",
 						    original_update_refname(update));
-					return -1;
+					ret = TRANSACTION_GENERIC_ERROR;
+					goto out;
 				}
 			} else if (check_old_oid(update, &lock->old_oid, err)) {
-				return TRANSACTION_GENERIC_ERROR;
+				ret = TRANSACTION_GENERIC_ERROR;
+				goto out;
 			}
 		} else {
 			/*
@@ -2378,13 +2390,15 @@ static int lock_ref_for_update(struct files_ref_store *refs,
 						  referent.buf, transaction,
 						  affected_refnames, err);
 			if (ret)
-				return ret;
+				goto out;
 		}
 	} else {
 		struct ref_update *parent_update;
 
-		if (check_old_oid(update, &lock->old_oid, err))
-			return TRANSACTION_GENERIC_ERROR;
+		if (check_old_oid(update, &lock->old_oid, err)) {
+			ret = TRANSACTION_GENERIC_ERROR;
+			goto out;
+		}
 
 		/*
 		 * If this update is happening indirectly because of a
@@ -2421,7 +2435,8 @@ static int lock_ref_for_update(struct files_ref_store *refs,
 				    "cannot update ref '%s': %s",
 				    update->refname, write_err);
 			free(write_err);
-			return TRANSACTION_GENERIC_ERROR;
+			ret = TRANSACTION_GENERIC_ERROR;
+			goto out;
 		} else {
 			update->flags |= REF_NEEDS_COMMIT;
 		}
@@ -2435,10 +2450,14 @@ static int lock_ref_for_update(struct files_ref_store *refs,
 		if (close_ref(lock)) {
 			strbuf_addf(err, "couldn't close '%s.lock'",
 				    update->refname);
-			return TRANSACTION_GENERIC_ERROR;
+			ret = TRANSACTION_GENERIC_ERROR;
+			goto out;
 		}
 	}
-	return 0;
+
+out:
+	strbuf_release(&referent);
+	return ret;
 }
 
 /*
