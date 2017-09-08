@@ -1,7 +1,9 @@
 #include "cache.h"
 #include "config.h"
+#include "repository.h"
 #include "refs.h"
 #include "pkt-line.h"
+#include "object-store.h"
 #include "object.h"
 #include "tag.h"
 #include "exec_cmd.h"
@@ -518,14 +520,14 @@ static void get_info_packs(struct strbuf *hdr, char *arg)
 	size_t cnt = 0;
 
 	select_getanyfile(hdr);
-	prepare_packed_git();
-	for (p = packed_git; p; p = p->next) {
+	prepare_packed_git(the_repository);
+	for (p = the_repository->objects.packed_git; p; p = p->next) {
 		if (p->pack_local)
 			cnt++;
 	}
 
 	strbuf_grow(&buf, cnt * 53 + 2);
-	for (p = packed_git; p; p = p->next) {
+	for (p = the_repository->objects.packed_git; p; p = p->next) {
 		if (p->pack_local)
 			strbuf_addf(&buf, "P %s\n", p->pack_name + objdirlen + 6);
 	}

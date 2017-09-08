@@ -1,6 +1,8 @@
 #include "git-compat-util.h"
 #include "http.h"
+#include "repository.h"
 #include "config.h"
+#include "object-store.h"
 #include "pack.h"
 #include "sideband.h"
 #include "run-command.h"
@@ -1898,7 +1900,7 @@ int finish_http_pack_request(struct http_pack_request *preq)
 		return -1;
 	}
 
-	install_packed_git(p);
+	install_packed_git(the_repository, p);
 	free(tmp_idx);
 	return 0;
 }
@@ -2011,7 +2013,7 @@ struct http_object_request *new_http_object_request(const char *base_url,
 	hashcpy(freq->sha1, sha1);
 	freq->localfile = -1;
 
-	filename = sha1_file_name(sha1);
+	filename = sha1_file_name(the_repository, sha1);
 	snprintf(freq->tmpfile, sizeof(freq->tmpfile),
 		 "%s.temp", filename);
 
@@ -2159,7 +2161,8 @@ int finish_http_object_request(struct http_object_request *freq)
 		return -1;
 	}
 	freq->rename =
-		finalize_object_file(freq->tmpfile, sha1_file_name(freq->sha1));
+		finalize_object_file(freq->tmpfile,
+				     sha1_file_name(the_repository, freq->sha1));
 
 	return freq->rename;
 }

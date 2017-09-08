@@ -4,6 +4,7 @@
 #include "git-compat-util.h"
 #include "strbuf.h"
 #include "hashmap.h"
+#include "mru.h"
 #include "advice.h"
 #include "gettext.h"
 #include "convert.h"
@@ -940,14 +941,6 @@ extern void check_repository_format(void);
 #define TYPE_CHANGED    0x0040
 
 /*
- * Return the name of the file in the local object database that would
- * be used to store a loose object with the specified sha1.  The
- * return value is a pointer to a statically allocated buffer that is
- * overwritten each time the function is called.
- */
-extern const char *sha1_file_name(const unsigned char *sha1);
-
-/*
  * Return an abbreviated sha1 unique within this repository's object database.
  * The result will be at least `len` characters long, and will be NUL
  * terminated.
@@ -1228,7 +1221,6 @@ extern int pretend_sha1_file(void *, unsigned long, enum object_type, unsigned c
 extern int force_object_loose(const unsigned char *sha1, time_t mtime);
 extern int git_open_cloexec(const char *name, int flags);
 #define git_open(name) git_open_cloexec(name, O_RDONLY)
-extern void *map_sha1_file(const unsigned char *sha1, unsigned long *size);
 extern int unpack_sha1_header(git_zstream *stream, unsigned char *map, unsigned long mapsize, void *buffer, unsigned long bufsiz);
 extern int parse_sha1_header(const char *hdr, unsigned long *sizep);
 
@@ -1548,7 +1540,7 @@ extern int has_dirs_only_path(const char *name, int len, int prefix_len);
 extern void schedule_dir_for_removal(const char *name, int len);
 extern void remove_scheduled_dirs(void);
 
-extern struct alternate_object_database {
+struct alternate_object_database {
 	struct alternate_object_database *next;
 
 	/* see alt_scratch_buf() */
@@ -1565,12 +1557,13 @@ extern struct alternate_object_database {
 	char loose_objects_subdir_seen[256];
 	struct oid_array loose_objects_cache;
 
+	/*
+	 * Path to the alternate object database, relative to the
+	 * current working directory.
+	 */
 	char path[FLEX_ARRAY];
-} *alt_odb_list;
-extern void prepare_alt_odb(void);
+};
 extern char *compute_alternate_path(const char *path, struct strbuf *err);
-typedef int alt_odb_fn(struct alternate_object_database *, void *);
-extern int foreach_alt_odb(alt_odb_fn, void*);
 
 /*
  * Allocate a "struct alternate_object_database" but do _not_ actually
@@ -1607,35 +1600,6 @@ struct pack_window {
 	unsigned int last_used;
 	unsigned int inuse_cnt;
 };
-
-extern struct packed_git {
-	struct packed_git *next;
-	struct pack_window *windows;
-	off_t pack_size;
-	const void *index_data;
-	size_t index_size;
-	uint32_t num_objects;
-	uint32_t num_bad_objects;
-	unsigned char *bad_object_sha1;
-	int index_version;
-	time_t mtime;
-	int pack_fd;
-	unsigned pack_local:1,
-		 pack_keep:1,
-		 freshened:1,
-		 do_not_close:1;
-	unsigned char sha1[20];
-	struct revindex_entry *revindex;
-	/* something like ".git/objects/pack/xxxxx.pack" */
-	char pack_name[FLEX_ARRAY]; /* more */
-} *packed_git;
-
-/*
- * A most-recently-used ordered version of the packed_git list, which can
- * be iterated instead of packed_git (and marked via mru_mark).
- */
-struct mru;
-extern struct mru *packed_git_mru;
 
 struct pack_entry {
 	off_t offset;
